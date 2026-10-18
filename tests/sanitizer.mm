@@ -35,6 +35,11 @@ static void fakeFreeNames(struct if_nameindex *p) {
 }
 int main(void) {
     @autoreleasepool {
+        assert(swiftPathQuery("$s7Network6NWPathV17usesInterfaceTypeySbAA11NWInterfaceV0dE0OF"));
+        assert(swiftPathQuery("$s7Network6NWPathVyACSo03nw_C0CcfC"));
+        assert(!swiftPathQuery("__SCNetworkReachabilityGetFlagsFromPath"));
+        assert(!swiftPathQuery("nw_resolver_create_dns_getaddrinfo_locked"));
+        assert(!swiftPathQuery(nullptr));
         for (const char *name : {"utun0", "utun99", "utun12345", "ipsec0", "ppp12", "tap", "tun9"})
             assert(tunnelName(name));
         for (const char *name : {"en0", "pdp_ip0", "lo0", "awdl0", "tunnel", "ipsecurity", "utunX", "", "bridge0"})

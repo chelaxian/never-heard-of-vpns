@@ -27,6 +27,17 @@ static bool clientCaller(const void *address) {
         && !strstr(path, "/System/Library/");
 }
 
+static bool swiftPathQuery(const char *symbol) {
+    // Stable Swift module/type mangling, observed on the device. These are the
+    // public value-type accessors used by apps, not Network's C routing engine.
+    return symbol && !strncmp(symbol, "$s7Network6NWPathV", 18);
+}
+static bool pathClientCaller(const void *address) {
+    if (clientCaller(address)) return true;
+    Dl_info info = {};
+    return dladdr(address, &info) && swiftPathQuery(info.dli_sname);
+}
+
 static bool tunnelName(const char *name) {
     if (!name) return false;
     const char *prefixes[] = {"utun", "ipsec", "ppp", "tap", "tun"};
@@ -178,7 +189,7 @@ static bool hiddenInterface(nw_interface_t interface) {
 }
 static void (*originalEnumerate)(nw_path_t, nw_path_enumerate_interfaces_block_t);
 static void replacedEnumerate(nw_path_t path, nw_path_enumerate_interfaces_block_t block) {
-    if (!clientCaller(__builtin_return_address(0))) { originalEnumerate(path, block); return; }
+    if (!pathClientCaller(__builtin_return_address(0))) { originalEnumerate(path, block); return; }
     if (!block) { originalEnumerate(path, block); return; }
     originalEnumerate(path, ^bool(nw_interface_t interface) {
         return hiddenInterface(interface) ? true : block(interface);
@@ -187,7 +198,7 @@ static void replacedEnumerate(nw_path_t path, nw_path_enumerate_interfaces_block
 static bool (*originalUsesType)(nw_path_t, nw_interface_type_t);
 static bool replacedUsesType(nw_path_t path, nw_interface_type_t type) {
     bool result = originalUsesType(path, type);
-    if (!clientCaller(__builtin_return_address(0))) return result;
+    if (!pathClientCaller(__builtin_return_address(0))) return result;
     if (!result || type != nw_interface_type_other) return result;
     __block bool tunnel = false, visibleOther = false;
     originalEnumerate(path, ^bool(nw_interface_t interface) {
@@ -278,13 +289,16 @@ __attribute__((constructor)) static void initialize(void) {
         addBinding("nw_path_uses_interface_type", (void *)replacedUsesType, (void **)&originalUsesType);
         addBinding("SCNetworkConnectionGetStatus", (void *)replacedSCStatus, (void **)&originalSCStatus);
         // Core detection APIs also support dynamic lookups and stripped import tables.
-        // Do not inline-hook Network.framework: its asynchronous internal callers
-        // must retain Apple's own implementation on every worker thread.
+        // Swift NWPath calls the shared C functions from Apple's overlay, beyond
+        // app import slots. The path-specific caller guard permits those public
+        // accessors while leaving internal C network-stack calls unmodified.
         hookCoreAPI("CFNetworkCopySystemProxySettings", (void *)replacedProxy, (void **)&originalProxy);
         hookCoreAPI("freeifaddrs", (void *)replacedFreeAddresses, (void **)&originalFreeAddresses);
         hookCoreAPI("getifaddrs", (void *)replacedGetAddresses, (void **)&originalGetAddresses);
         hookCoreAPI("if_freenameindex", (void *)replacedFreeNameIndex, (void **)&originalFreeNameIndex);
         hookCoreAPI("if_nameindex", (void *)replacedNameIndex, (void **)&originalNameIndex);
+        hookCoreAPI("nw_path_enumerate_interfaces", (void *)replacedEnumerate, (void **)&originalEnumerate);
+        hookCoreAPI("nw_path_uses_interface_type", (void *)replacedUsesType, (void **)&originalUsesType);
         Class connection = NSClassFromString(@"NEVPNConnection");
         Method method = connection ? class_getInstanceMethod(connection, @selector(status)) : nullptr;
         if (method) originalVPNStatus = (NSInteger (*)(id, SEL))method_setImplementation(method, (IMP)replacedVPNStatus);
