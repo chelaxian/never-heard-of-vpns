@@ -23,6 +23,9 @@
 
 #include "fishhook.h"
 
+// ratu.sh 2026-10-18: expose aggregate binding counters for validation, no network data.
+uint64_t nhovpn_binding_stats[4];
+
 #include <dlfcn.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -121,6 +124,7 @@ static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
   void **indirect_symbol_bindings = (void **)((uintptr_t)slide + section->addr);
 
   for (uint i = 0; i < section->size / sizeof(void *); i++) {
+    __atomic_fetch_add(&nhovpn_binding_stats[1], 1, __ATOMIC_RELAXED);
     uint32_t symtab_index = indirect_symbol_indices[i];
     if (symtab_index == INDIRECT_SYMBOL_ABS || symtab_index == INDIRECT_SYMBOL_LOCAL ||
         symtab_index == (INDIRECT_SYMBOL_LOCAL   | INDIRECT_SYMBOL_ABS)) {
@@ -133,6 +137,7 @@ static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
     while (cur) {
       for (uint j = 0; j < cur->rebindings_nel; j++) {
         if (symbol_name_longer_than_1 && strcmp(&symbol_name[1], cur->rebindings[j].name) == 0) {
+          __atomic_fetch_add(&nhovpn_binding_stats[2], 1, __ATOMIC_RELAXED);
           kern_return_t err;
 
           if (cur->rebindings[j].replaced != NULL && indirect_symbol_bindings[i] != cur->rebindings[j].replacement)
@@ -154,6 +159,7 @@ static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
              * -- Lionfore Hao Jun 11th, 2021
              **/
             indirect_symbol_bindings[i] = cur->rebindings[j].replacement;
+            __atomic_fetch_add(&nhovpn_binding_stats[3], 1, __ATOMIC_RELAXED);
           }
           goto symbol_loop;
         }
@@ -167,6 +173,7 @@ static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
 static void rebind_symbols_for_image(struct rebindings_entry *rebindings,
                                      const struct mach_header *header,
                                      intptr_t slide) {
+  __atomic_fetch_add(&nhovpn_binding_stats[0], 1, __ATOMIC_RELAXED);
   Dl_info info;
   if (dladdr(header, &info) == 0) {
     return;

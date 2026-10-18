@@ -13,6 +13,10 @@ int main(int argc, char **argv) {
             if (!dlopen(argv[1], RTLD_NOW | RTLD_GLOBAL)) { fprintf(stderr, "%s\n", dlerror()); return 2; }
         }
         NSMutableDictionary *report = [NSMutableDictionary dictionary];
+        if (argc == 2) {
+            void (*stats)(uint64_t *) = (void (*)(uint64_t *))dlsym(RTLD_DEFAULT, "NHOVPNBindingStats");
+            if (stats) { uint64_t values[4]; stats(values); report[@"binding_stats"] = @[@(values[0]), @(values[1]), @(values[2]), @(values[3])]; }
+        }
         NSMutableArray *addresses = [NSMutableArray array], *names = [NSMutableArray array];
         struct ifaddrs *head = nullptr;
         int rc = getifaddrs(&head); report[@"getifaddrs_rc"] = @(rc);

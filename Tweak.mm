@@ -235,6 +235,10 @@ static bool eligibleProcess(void) {
 static struct rebinding bindings[8];
 static size_t bindingCount;
 static NSString *applicationRoot;
+extern "C" uint64_t nhovpn_binding_stats[4];
+extern "C" __attribute__((visibility("default"), used)) void NHOVPNBindingStats(uint64_t *out) {
+    for (size_t i = 0; i < 4; ++i) out[i] = __atomic_load_n(&nhovpn_binding_stats[i], __ATOMIC_RELAXED);
+}
 static void addBinding(const char *name, void *replacement, void **original) {
     *original = dlsym(RTLD_DEFAULT, name);
     if (*original) bindings[bindingCount++] = {name, replacement, nullptr};
