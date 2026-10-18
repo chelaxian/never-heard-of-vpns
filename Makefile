@@ -10,5 +10,6 @@ $(TWEAK_NAME)_FILES = Tweak.mm vendor/fishhook/fishhook.c
 $(TWEAK_NAME)_CFLAGS = -fobjc-arc
 $(TWEAK_NAME)_CCFLAGS = -std=c++17
 $(TWEAK_NAME)_FRAMEWORKS = Foundation CFNetwork Network NetworkExtension SystemConfiguration
+$(TWEAK_NAME)_LIBRARIES = substrate
 
 include $(THEOS_MAKE_PATH)/tweak.mk

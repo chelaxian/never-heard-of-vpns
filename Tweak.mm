@@ -236,6 +236,8 @@ static struct rebinding bindings[8];
 static size_t bindingCount;
 static NSString *applicationRoot;
 extern "C" uint64_t nhovpn_binding_stats[4];
+extern "C" void (*nhovpn_memory_writer)(void *, const void *, uint64_t);
+extern "C" void MSHookMemory(void *, const void *, size_t);
 extern "C" __attribute__((visibility("default"), used)) void NHOVPNBindingStats(uint64_t *out) {
     for (size_t i = 0; i < 4; ++i) out[i] = __atomic_load_n(&nhovpn_binding_stats[i], __ATOMIC_RELAXED);
 }
@@ -257,6 +259,7 @@ static void rebindClientImage(const struct mach_header *header, intptr_t slide) 
 __attribute__((constructor)) static void initialize(void) {
     @autoreleasepool {
         if (!eligibleProcess()) return;
+        nhovpn_memory_writer = (void (*)(void *, const void *, uint64_t))MSHookMemory;
         applicationRoot = [NSBundle.mainBundle.bundlePath stringByResolvingSymlinksInPath];
         addBinding("CFNetworkCopySystemProxySettings", (void *)replacedProxy, (void **)&originalProxy);
         addBinding("freeifaddrs", (void *)replacedFreeAddresses, (void **)&originalFreeAddresses);

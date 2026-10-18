@@ -25,6 +25,7 @@
 
 // ratu.sh 2026-10-18: expose aggregate binding counters for validation, no network data.
 uint64_t nhovpn_binding_stats[4];
+void (*nhovpn_memory_writer)(void *, const void *, uint64_t);
 
 #include <dlfcn.h>
 #include <stdbool.h>
@@ -165,7 +166,8 @@ static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
             // Use the active injection provider's public memory-write API for
             // this single import pointer. Never patch Apple's function bodies.
             typedef void (*memory_hook_t)(void *, const void *, uint64_t);
-            memory_hook_t writer = (memory_hook_t)dlsym(RTLD_DEFAULT, "MSHookMemory");
+            memory_hook_t writer = nhovpn_memory_writer;
+            if (!writer) writer = (memory_hook_t)dlsym(RTLD_DEFAULT, "MSHookMemory");
             if (writer) {
               void *replacement = cur->rebindings[j].replacement;
               writer(&indirect_symbol_bindings[i], &replacement, sizeof(replacement));
