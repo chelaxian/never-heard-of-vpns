@@ -238,12 +238,17 @@ static NSString *applicationRoot;
 extern "C" uint64_t nhovpn_binding_stats[4];
 extern "C" void (*nhovpn_memory_writer)(void *, const void *, uint64_t);
 extern "C" void MSHookMemory(void *, const void *, size_t);
+extern "C" void MSHookFunction(void *, void *, void **);
 extern "C" __attribute__((visibility("default"), used)) void NHOVPNBindingStats(uint64_t *out) {
     for (size_t i = 0; i < 4; ++i) out[i] = __atomic_load_n(&nhovpn_binding_stats[i], __ATOMIC_RELAXED);
 }
 static void addBinding(const char *name, void *replacement, void **original) {
     *original = dlsym(RTLD_DEFAULT, name);
     if (*original) bindings[bindingCount++] = {name, replacement, nullptr};
+}
+static void hookCoreAPI(const char *name, void *replacement, void **original) {
+    void *symbol = dlsym(RTLD_DEFAULT, name);
+    if (symbol) MSHookFunction(symbol, replacement, original);
 }
 static void rebindClientImage(const struct mach_header *header, intptr_t slide) {
     Dl_info info = {};
@@ -269,6 +274,14 @@ __attribute__((constructor)) static void initialize(void) {
         addBinding("nw_path_enumerate_interfaces", (void *)replacedEnumerate, (void **)&originalEnumerate);
         addBinding("nw_path_uses_interface_type", (void *)replacedUsesType, (void **)&originalUsesType);
         addBinding("SCNetworkConnectionGetStatus", (void *)replacedSCStatus, (void **)&originalSCStatus);
+        // Core detection APIs also support dynamic lookups and stripped import tables.
+        // Do not inline-hook Network.framework: its asynchronous internal callers
+        // must retain Apple's own implementation on every worker thread.
+        hookCoreAPI("CFNetworkCopySystemProxySettings", (void *)replacedProxy, (void **)&originalProxy);
+        hookCoreAPI("freeifaddrs", (void *)replacedFreeAddresses, (void **)&originalFreeAddresses);
+        hookCoreAPI("getifaddrs", (void *)replacedGetAddresses, (void **)&originalGetAddresses);
+        hookCoreAPI("if_freenameindex", (void *)replacedFreeNameIndex, (void **)&originalFreeNameIndex);
+        hookCoreAPI("if_nameindex", (void *)replacedNameIndex, (void **)&originalNameIndex);
         Class connection = NSClassFromString(@"NEVPNConnection");
         Method method = connection ? class_getInstanceMethod(connection, @selector(status)) : nullptr;
         if (method) originalVPNStatus = (NSInteger (*)(id, SEL))method_setImplementation(method, (IMP)replacedVPNStatus);
