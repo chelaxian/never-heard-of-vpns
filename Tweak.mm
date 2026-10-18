@@ -235,6 +235,7 @@ static bool eligibleProcess(void) {
 static struct rebinding bindings[8];
 static size_t bindingCount;
 static NSString *applicationRoot;
+static NSString *applicationExecutable;
 extern "C" uint64_t nhovpn_binding_stats[4];
 extern "C" void (*nhovpn_memory_writer)(void *, const void *, uint64_t);
 extern "C" void MSHookMemory(void *, const void *, size_t);
@@ -253,10 +254,11 @@ static void hookCoreAPI(const char *name, void *replacement, void **original) {
 static void rebindClientImage(const struct mach_header *header, intptr_t slide) {
     Dl_info info = {};
     if (!dladdr(header, &info) || !info.dli_fname) return;
-    if (header != _dyld_get_image_header(0)) {
-        const char *root = applicationRoot.UTF8String;
-        if (!root || strncmp(info.dli_fname, root, strlen(root)) || info.dli_fname[strlen(root)] != '/') return;
-    }
+    NSString *path = [@(info.dli_fname) stringByResolvingSymlinksInPath];
+    BOOL mainExecutable = [path isEqualToString:applicationExecutable];
+    BOOL embeddedImage = [applicationRoot.pathExtension isEqualToString:@"app"] &&
+        [path hasPrefix:[applicationRoot stringByAppendingString:@"/"]];
+    if (!mainExecutable && !embeddedImage) return;
     // Only this image's import slots are changed. Apple's shared-cache code and
     // internal function calls remain untouched, including on newly created threads.
     rebind_symbols_image((void *)header, slide, bindings, bindingCount);
@@ -266,6 +268,7 @@ __attribute__((constructor)) static void initialize(void) {
         if (!eligibleProcess()) return;
         nhovpn_memory_writer = (void (*)(void *, const void *, uint64_t))MSHookMemory;
         applicationRoot = [NSBundle.mainBundle.bundlePath stringByResolvingSymlinksInPath];
+        applicationExecutable = [NSBundle.mainBundle.executablePath stringByResolvingSymlinksInPath];
         addBinding("CFNetworkCopySystemProxySettings", (void *)replacedProxy, (void **)&originalProxy);
         addBinding("freeifaddrs", (void *)replacedFreeAddresses, (void **)&originalFreeAddresses);
         addBinding("getifaddrs", (void *)replacedGetAddresses, (void **)&originalGetAddresses);
