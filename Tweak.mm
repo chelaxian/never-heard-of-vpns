@@ -15,6 +15,16 @@
 #include <substrate.h>
 #endif
 
+// Apple frameworks use the same APIs to maintain real connectivity. Mask only
+// requests from application/embedded SDK code, never internal network-stack calls.
+static bool clientCaller(const void *address) {
+    Dl_info info = {};
+    if (!dladdr(address, &info) || !info.dli_fname) return true;
+    const char *path = info.dli_fname;
+    return strncmp(path, "/System/", 8) && strncmp(path, "/usr/lib/", 9)
+        && !strstr(path, "/System/Library/");
+}
+
 static bool tunnelName(const char *name) {
     if (!name) return false;
     const char *prefixes[] = {"utun", "ipsec", "ppp", "tap", "tun"};
@@ -49,6 +59,7 @@ static NSDictionary *sanitizeProxy(NSDictionary *settings) {
 static CFDictionaryRef (*originalProxy)(void);
 static CFDictionaryRef replacedProxy(void) {
     CFDictionaryRef value = originalProxy();
+    if (!clientCaller(__builtin_return_address(0))) return value;
     if (!value) return nullptr;
     NSDictionary *settings = CFBridgingRelease(value);
     return (__bridge_retained CFDictionaryRef)sanitizeProxy(settings);
@@ -69,6 +80,7 @@ static void (*originalFreeAddresses)(struct ifaddrs *);
 static int replacedGetAddresses(struct ifaddrs **out) {
     int rc = originalGetAddresses(out);
     int saved = errno;
+    if (!clientCaller(__builtin_return_address(0))) { errno = saved; return rc; }
     if (rc || !out || !*out) { errno = saved; return rc; }
     size_t count = 0, hidden = 0;
     for (struct ifaddrs *p = *out; p; p = p->ifa_next)
@@ -124,6 +136,7 @@ static void (*originalFreeNameIndex)(struct if_nameindex *);
 static struct if_nameindex *replacedNameIndex(void) {
     struct if_nameindex *items = originalNameIndex();
     int saved = errno;
+    if (!clientCaller(__builtin_return_address(0))) { errno = saved; return items; }
     if (!items) return items;
     size_t count = 0, hidden = 0;
     for (size_t i = 0; items[i].if_index || items[i].if_name; ++i)
@@ -163,6 +176,7 @@ static bool hiddenInterface(nw_interface_t interface) {
 }
 static void (*originalEnumerate)(nw_path_t, nw_path_enumerate_interfaces_block_t);
 static void replacedEnumerate(nw_path_t path, nw_path_enumerate_interfaces_block_t block) {
+    if (!clientCaller(__builtin_return_address(0))) { originalEnumerate(path, block); return; }
     if (!block) { originalEnumerate(path, block); return; }
     originalEnumerate(path, ^bool(nw_interface_t interface) {
         return hiddenInterface(interface) ? true : block(interface);
@@ -171,6 +185,7 @@ static void replacedEnumerate(nw_path_t path, nw_path_enumerate_interfaces_block
 static bool (*originalUsesType)(nw_path_t, nw_interface_type_t);
 static bool replacedUsesType(nw_path_t path, nw_interface_type_t type) {
     bool result = originalUsesType(path, type);
+    if (!clientCaller(__builtin_return_address(0))) return result;
     if (!result || type != nw_interface_type_other) return result;
     __block bool tunnel = false, visibleOther = false;
     originalEnumerate(path, ^bool(nw_interface_t interface) {
@@ -184,6 +199,7 @@ static bool replacedUsesType(nw_path_t path, nw_interface_type_t type) {
 static NSInteger (*originalVPNStatus)(id, SEL);
 static NSInteger replacedVPNStatus(id connection, SEL selector) {
     NSInteger status = originalVPNStatus(connection, selector);
+    if (!clientCaller(__builtin_return_address(0))) return status;
     // Preserve invalid (0), disconnected (1), and unknown future enum values.
     return status >= 2 && status <= 5 ? 1 : status;
 }
@@ -192,6 +208,7 @@ static NSInteger replacedVPNStatus(id connection, SEL selector) {
 static int32_t (*originalSCStatus)(const void *);
 static int32_t replacedSCStatus(const void *connection) {
     int32_t status = originalSCStatus(connection);
+    if (!clientCaller(__builtin_return_address(0))) return status;
     return status >= 1 && status <= 3 ? 0 : status;
 }
 
