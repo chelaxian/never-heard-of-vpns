@@ -187,12 +187,17 @@ static void replacedFreeNameIndex(struct if_nameindex *items) {
 static bool hiddenInterface(nw_interface_t interface) {
     return interface && tunnelName(nw_interface_get_name(interface));
 }
+static uint64_t pathMaskStats[2];
 static void (*originalEnumerate)(nw_path_t, nw_path_enumerate_interfaces_block_t);
 static void replacedEnumerate(nw_path_t path, nw_path_enumerate_interfaces_block_t block) {
     if (!pathClientCaller(__builtin_return_address(0))) { originalEnumerate(path, block); return; }
     if (!block) { originalEnumerate(path, block); return; }
     originalEnumerate(path, ^bool(nw_interface_t interface) {
-        return hiddenInterface(interface) ? true : block(interface);
+        if (hiddenInterface(interface)) {
+            __atomic_fetch_add(&pathMaskStats[0], 1, __ATOMIC_RELAXED);
+            return true;
+        }
+        return block(interface);
     });
 }
 static bool (*originalUsesType)(nw_path_t, nw_interface_type_t);
@@ -206,7 +211,11 @@ static bool replacedUsesType(nw_path_t path, nw_interface_type_t type) {
         else if (nw_interface_get_type(interface) == nw_interface_type_other) visibleOther = true;
         return true;
     });
-    return tunnel && !visibleOther ? false : result;
+    if (tunnel && !visibleOther) {
+        __atomic_fetch_add(&pathMaskStats[1], 1, __ATOMIC_RELAXED);
+        return false;
+    }
+    return result;
 }
 
 static NSInteger (*originalVPNStatus)(id, SEL);
@@ -253,6 +262,9 @@ extern "C" void MSHookMemory(void *, const void *, size_t);
 extern "C" void MSHookFunction(void *, void *, void **);
 extern "C" __attribute__((visibility("default"), used)) void NHOVPNBindingStats(uint64_t *out) {
     for (size_t i = 0; i < 4; ++i) out[i] = __atomic_load_n(&nhovpn_binding_stats[i], __ATOMIC_RELAXED);
+}
+extern "C" __attribute__((visibility("default"), used)) void NHOVPNPathMaskStats(uint64_t *out) {
+    for (size_t i = 0; i < 2; ++i) out[i] = __atomic_load_n(&pathMaskStats[i], __ATOMIC_RELAXED);
 }
 static void addBinding(const char *name, void *replacement, void **original) {
     *original = dlsym(RTLD_DEFAULT, name);
