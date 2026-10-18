@@ -12,7 +12,9 @@
 #include <stdlib.h>
 #include <string.h>
 #ifndef NHOVPN_TEST
-#include <substrate.h>
+#include "vendor/fishhook/fishhook.h"
+#include <mach-o/dyld.h>
+#include <objc/runtime.h>
 #endif
 
 // Apple frameworks use the same APIs to maintain real connectivity. Mask only
@@ -230,28 +232,35 @@ static bool eligibleProcess(void) {
     }
     return true;
 }
-static void installHook(const char *name, void *replacement, void **original) {
-    void *symbol = dlsym(RTLD_DEFAULT, name);
-    if (symbol) MSHookFunction(symbol, replacement, original);
+static struct rebinding bindings[8];
+static size_t bindingCount;
+static void addBinding(const char *name, void *replacement, void **original) {
+    *original = dlsym(RTLD_DEFAULT, name);
+    if (*original) bindings[bindingCount++] = {name, replacement, nullptr};
+}
+static void rebindClientImage(const struct mach_header *header, intptr_t slide) {
+    if (!clientCaller(header)) return;
+    Dl_info info = {};
+    if (dladdr(header, &info) && info.dli_fname && strstr(info.dli_fname, "NeverHeardOfVPNs")) return;
+    // Only this image's import slots are changed. Apple's shared-cache code and
+    // internal function calls remain untouched, including on newly created threads.
+    rebind_symbols_image((void *)header, slide, bindings, bindingCount);
 }
 __attribute__((constructor)) static void initialize(void) {
     @autoreleasepool {
         if (!eligibleProcess()) return;
-        installHook("CFNetworkCopySystemProxySettings", (void *)replacedProxy, (void **)&originalProxy);
-        // Install the deallocator first so every filtered list has a valid release path.
-        installHook("freeifaddrs", (void *)replacedFreeAddresses, (void **)&originalFreeAddresses);
-        if (originalFreeAddresses)
-            installHook("getifaddrs", (void *)replacedGetAddresses, (void **)&originalGetAddresses);
-        installHook("if_freenameindex", (void *)replacedFreeNameIndex, (void **)&originalFreeNameIndex);
-        if (originalFreeNameIndex)
-            installHook("if_nameindex", (void *)replacedNameIndex, (void **)&originalNameIndex);
-        installHook("nw_path_enumerate_interfaces", (void *)replacedEnumerate, (void **)&originalEnumerate);
-        if (originalEnumerate)
-            installHook("nw_path_uses_interface_type", (void *)replacedUsesType, (void **)&originalUsesType);
+        addBinding("CFNetworkCopySystemProxySettings", (void *)replacedProxy, (void **)&originalProxy);
+        addBinding("freeifaddrs", (void *)replacedFreeAddresses, (void **)&originalFreeAddresses);
+        addBinding("getifaddrs", (void *)replacedGetAddresses, (void **)&originalGetAddresses);
+        addBinding("if_freenameindex", (void *)replacedFreeNameIndex, (void **)&originalFreeNameIndex);
+        addBinding("if_nameindex", (void *)replacedNameIndex, (void **)&originalNameIndex);
+        addBinding("nw_path_enumerate_interfaces", (void *)replacedEnumerate, (void **)&originalEnumerate);
+        addBinding("nw_path_uses_interface_type", (void *)replacedUsesType, (void **)&originalUsesType);
+        addBinding("SCNetworkConnectionGetStatus", (void *)replacedSCStatus, (void **)&originalSCStatus);
         Class connection = NSClassFromString(@"NEVPNConnection");
-        if (connection && class_getInstanceMethod(connection, @selector(status)))
-            MSHookMessageEx(connection, @selector(status), (IMP)replacedVPNStatus, (IMP *)&originalVPNStatus);
-        installHook("SCNetworkConnectionGetStatus", (void *)replacedSCStatus, (void **)&originalSCStatus);
+        Method method = connection ? class_getInstanceMethod(connection, @selector(status)) : nullptr;
+        if (method) originalVPNStatus = (NSInteger (*)(id, SEL))method_setImplementation(method, (IMP)replacedVPNStatus);
+        _dyld_register_func_for_add_image(rebindClientImage);
     }
 }
 #endif

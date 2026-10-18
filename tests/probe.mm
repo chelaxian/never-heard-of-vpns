@@ -10,7 +10,6 @@
 int main(int argc, char **argv) {
     @autoreleasepool {
         if (argc == 2) {
-            dlopen("/var/jb/usr/lib/libsubstrate.dylib", RTLD_NOW | RTLD_GLOBAL);
             if (!dlopen(argv[1], RTLD_NOW | RTLD_GLOBAL)) { fprintf(stderr, "%s\n", dlerror()); return 2; }
         }
         NSMutableDictionary *report = [NSMutableDictionary dictionary];
