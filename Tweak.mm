@@ -3,6 +3,7 @@
 #import <Foundation/Foundation.h>
 #import <CFNetwork/CFNetwork.h>
 #import <Network/Network.h>
+#import <NetworkExtension/NetworkExtension.h>
 #include <ifaddrs.h>
 #include <net/if.h>
 #include <pthread.h>
@@ -180,6 +181,20 @@ static bool replacedUsesType(nw_path_t path, nw_interface_type_t type) {
     return tunnel && !visibleOther ? false : result;
 }
 
+static NSInteger (*originalVPNStatus)(id, SEL);
+static NSInteger replacedVPNStatus(id connection, SEL selector) {
+    NSInteger status = originalVPNStatus(connection, selector);
+    // Preserve invalid (0), disconnected (1), and unknown future enum values.
+    return status >= 2 && status <= 5 ? 1 : status;
+}
+// Resolve the legacy SystemConfiguration API dynamically: it is not part of the
+// supported iOS headers on every SDK, and an absent symbol must remain harmless.
+static int32_t (*originalSCStatus)(const void *);
+static int32_t replacedSCStatus(const void *connection) {
+    int32_t status = originalSCStatus(connection);
+    return status >= 1 && status <= 3 ? 0 : status;
+}
+
 #ifndef NHOVPN_TEST
 static bool eligibleProcess(void) {
     NSBundle *bundle = NSBundle.mainBundle;
@@ -216,6 +231,10 @@ __attribute__((constructor)) static void initialize(void) {
         installHook("nw_path_enumerate_interfaces", (void *)replacedEnumerate, (void **)&originalEnumerate);
         if (originalEnumerate)
             installHook("nw_path_uses_interface_type", (void *)replacedUsesType, (void **)&originalUsesType);
+        Class connection = NSClassFromString(@"NEVPNConnection");
+        if (connection && class_getInstanceMethod(connection, @selector(status)))
+            MSHookMessageEx(connection, @selector(status), (IMP)replacedVPNStatus, (IMP *)&originalVPNStatus);
+        installHook("SCNetworkConnectionGetStatus", (void *)replacedSCStatus, (void **)&originalSCStatus);
     }
 }
 #endif

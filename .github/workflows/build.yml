@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Test filtering and allocation ownership
         run: |
-          clang++ -std=c++17 -fobjc-arc -fsanitize=address,undefined -g -framework Foundation -framework CFNetwork -framework Network tests/sanitizer.mm -o /tmp/nhovpn-tests
+          clang++ -std=c++17 -fobjc-arc -fsanitize=address,undefined -g -framework Foundation -framework CFNetwork -framework Network -framework NetworkExtension tests/sanitizer.mm -o /tmp/nhovpn-tests
           /tmp/nhovpn-tests
       - name: Install Theos
         run: |

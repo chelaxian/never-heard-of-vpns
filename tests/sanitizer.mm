@@ -8,6 +8,10 @@
 
 static struct ifaddrs fixture[5];
 static std::atomic<int> releases{0};
+static NSInteger testVPNStatus;
+static int32_t testSCStatus;
+static NSInteger fakeVPNStatus(id, SEL) { return testVPNStatus; }
+static int32_t fakeSCStatus(const void *) { return testSCStatus; }
 static int fakeGet(struct ifaddrs **out) { *out = fixture; errno = EBUSY; return 0; }
 static int fakeError(struct ifaddrs **) { errno = EACCES; return -1; }
 static void fakeFree(struct ifaddrs *p) { assert(p == fixture); ++releases; }
@@ -77,6 +81,15 @@ int main(void) {
         assert(errno == EBUSY && names[0].if_index == 2 && !strcmp(names[0].if_name, "en0"));
         assert(!names[1].if_index && !names[1].if_name);
         replacedFreeNameIndex(names); assert(!nameAllocations);
+        originalVPNStatus = fakeVPNStatus; originalSCStatus = fakeSCStatus;
+        for (NSInteger status = 0; status <= 6; ++status) {
+            testVPNStatus = status;
+            assert(replacedVPNStatus(nil, @selector(status)) == (status >= 2 && status <= 5 ? 1 : status));
+        }
+        for (int32_t status = -1; status <= 4; ++status) {
+            testSCStatus = status;
+            assert(replacedSCStatus(nullptr) == (status >= 1 && status <= 3 ? 0 : status));
+        }
         puts("PASS: proxy preservation, prefix matching, head/middle/tail/all/no tunnels, ownership, errors, 8000 concurrent allocations");
     }
 }
