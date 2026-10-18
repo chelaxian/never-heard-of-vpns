@@ -6,6 +6,7 @@
 #include <net/if.h>
 #include <dlfcn.h>
 #include <stdio.h>
+#include <CommonCrypto/CommonDigest.h>
 int main(int argc, char **argv) {
     @autoreleasepool {
         if (argc == 2) {
@@ -53,8 +54,33 @@ int main(int argc, char **argv) {
         report[@"path"] = timeout ? @{@"timeout": @YES} : pathResult;
         for (int i = 0; i < 2000; ++i) { struct ifaddrs *p = nullptr; if (!getifaddrs(&p)) freeifaddrs(p); }
         report[@"allocation_cycles"] = @2000;
+        // Verify real HTTPS transfer from the same process whose APIs are masked.
+        // Hash the IP response so validation never publishes the user's exit address.
+        dispatch_semaphore_t downloaded = dispatch_semaphore_create(0);
+        NSURLSessionConfiguration *config = NSURLSessionConfiguration.ephemeralSessionConfiguration;
+        config.timeoutIntervalForRequest = 15;
+        NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
+        __block NSDictionary *transfer;
+        NSURL *url = [NSURL URLWithString:@"https://api.ipify.org?format=json"];
+        [[session dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+            NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? [(NSHTTPURLResponse *)response statusCode] : 0;
+            NSDictionary *json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+            NSString *ip = [json isKindOfClass:NSDictionary.class] ? json[@"ip"] : nil;
+            NSMutableString *fingerprint = [NSMutableString string];
+            if ([ip isKindOfClass:NSString.class]) {
+                NSData *value = [ip dataUsingEncoding:NSUTF8StringEncoding];
+                unsigned char digest[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(value.bytes, (CC_LONG)value.length, digest);
+                for (unsigned char byte : digest) [fingerprint appendFormat:@"%02x", byte];
+            }
+            transfer = @{@"http_status": @(status), @"bytes": @(data.length), @"egress_sha256": fingerprint,
+                @"error_code": @(error ? error.code : 0)};
+            dispatch_semaphore_signal(downloaded);
+        }] resume];
+        long transferTimeout = dispatch_semaphore_wait(downloaded, dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC));
+        [session invalidateAndCancel];
+        report[@"transfer"] = transferTimeout ? @{@"timeout": @YES} : transfer;
         NSData *data = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingPrettyPrinted error:nil];
         fwrite(data.bytes, 1, data.length, stdout); putchar('\n');
-        return timeout ? 3 : 0;
+        return timeout || transferTimeout ? 3 : 0;
     }
 }
