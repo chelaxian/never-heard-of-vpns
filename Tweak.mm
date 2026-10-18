@@ -234,14 +234,18 @@ static bool eligibleProcess(void) {
 }
 static struct rebinding bindings[8];
 static size_t bindingCount;
+static NSString *applicationRoot;
 static void addBinding(const char *name, void *replacement, void **original) {
     *original = dlsym(RTLD_DEFAULT, name);
     if (*original) bindings[bindingCount++] = {name, replacement, nullptr};
 }
 static void rebindClientImage(const struct mach_header *header, intptr_t slide) {
-    if (!clientCaller(header)) return;
     Dl_info info = {};
-    if (dladdr(header, &info) && info.dli_fname && strstr(info.dli_fname, "NeverHeardOfVPNs")) return;
+    if (!dladdr(header, &info) || !info.dli_fname) return;
+    if (header != _dyld_get_image_header(0)) {
+        const char *root = applicationRoot.UTF8String;
+        if (!root || strncmp(info.dli_fname, root, strlen(root)) || info.dli_fname[strlen(root)] != '/') return;
+    }
     // Only this image's import slots are changed. Apple's shared-cache code and
     // internal function calls remain untouched, including on newly created threads.
     rebind_symbols_image((void *)header, slide, bindings, bindingCount);
@@ -249,6 +253,7 @@ static void rebindClientImage(const struct mach_header *header, intptr_t slide) 
 __attribute__((constructor)) static void initialize(void) {
     @autoreleasepool {
         if (!eligibleProcess()) return;
+        applicationRoot = [NSBundle.mainBundle.bundlePath stringByResolvingSymlinksInPath];
         addBinding("CFNetworkCopySystemProxySettings", (void *)replacedProxy, (void **)&originalProxy);
         addBinding("freeifaddrs", (void *)replacedFreeAddresses, (void **)&originalFreeAddresses);
         addBinding("getifaddrs", (void *)replacedGetAddresses, (void **)&originalGetAddresses);
