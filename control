@@ -3,7 +3,7 @@ Name: NeverHeardOfVPNs Ratu
 Depends: mobilesubstrate, firmware (>= 17.0), firmware (<= 26.0.1)
 Version: 1.1.0
 Architecture: iphoneos-arm64
-Description: Hides common local VPN interface checks. Does not hide exit IP reputation. iOS 17.0-26.0.1 with compatible rootless injection; iOS 26 runtime untested.
+Description: Скрытие распространённых локальных признаков VPN без переключения маршрута. Rootless iOS 17.0–26.0.1; iOS 26 не проверена. Внешний IP не скрывается.
 Maintainer: ratu.sh
 Author: thatmarcel
 Section: Tweaks
