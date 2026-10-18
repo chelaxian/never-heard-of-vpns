@@ -1,9 +1,10 @@
 Package: com.thatmarcel.tweaks.neverheardofvpns
-Name: NeverHeardOfVPNs
-Depends: mobilesubstrate
-Version: 1.0.1
-Architecture: iphoneos-arm
-Description: I'm using a VPN? Uhhhh, no.
-Maintainer: thatmarcel
+Name: NeverHeardOfVPNs Ratu
+Depends: mobilesubstrate, firmware (>= 17.0), firmware (<= 26.0.1)
+Version: 1.1.0
+Architecture: iphoneos-arm64
+Description: Hides common local VPN interface checks. Does not hide exit IP reputation. iOS 17.0-26.0.1 with compatible rootless injection; iOS 26 runtime untested.
+Maintainer: ratu.sh
 Author: thatmarcel
 Section: Tweaks
+Homepage: https://github.com/chelaxian/never-heard-of-vpns

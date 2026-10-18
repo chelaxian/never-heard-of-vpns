@@ -1,11 +1,14 @@
-ARCHS = arm64
-TARGET := iphone:clang:latest:15.0
+ARCHS = arm64 arm64e
+TARGET := iphone:clang:latest:17.0
+THEOS_PACKAGE_SCHEME = rootless
 
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = NeverHeardOfVPNs
 
-$(TWEAK_NAME)_FILES = Tweak.xm
-$(TWEAK_NAME)_CFLAGS = -fobjc-arc -Wno-module-import-in-extern-c
+$(TWEAK_NAME)_FILES = Tweak.mm
+$(TWEAK_NAME)_CFLAGS = -fobjc-arc
+$(TWEAK_NAME)_CCFLAGS = -std=c++17
+$(TWEAK_NAME)_FRAMEWORKS = Foundation CFNetwork Network
 
 include $(THEOS_MAKE_PATH)/tweak.mk

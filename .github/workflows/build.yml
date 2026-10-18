@@ -1,0 +1,46 @@
+name: Build and validate rootless
+on:
+  push:
+    branches: [ratu-rootless]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test filtering and allocation ownership
+        run: |
+          clang++ -std=c++17 -fobjc-arc -fsanitize=address,undefined -g -framework Foundation -framework CFNetwork -framework Network tests/sanitizer.mm -o /tmp/nhovpn-tests
+          /tmp/nhovpn-tests
+      - name: Install Theos
+        run: |
+          brew install ldid dpkg
+          git clone --quiet --depth=1 --recursive https://github.com/theos/theos.git "$HOME/theos"
+      - name: Build package and device probe
+        run: |
+          THEOS="$HOME/theos" make clean package FINALPACKAGE=1
+          mkdir -p artifacts
+          cp packages/*.deb artifacts/
+          sdk="$(xcrun --sdk iphoneos --show-sdk-path)"
+          xcrun --sdk iphoneos clang++ -std=c++17 -arch arm64 -isysroot "$sdk" -miphoneos-version-min=17.0 -fobjc-arc -framework Foundation -framework CFNetwork -framework Network tests/probe.mm -o artifacts/nhovpn-probe
+          ldid -S artifacts/nhovpn-probe
+      - name: Inspect rootless package and modern arm64e ABI
+        run: |
+          deb="$(echo artifacts/*.deb)"
+          test "$(dpkg-deb -f "$deb" Architecture)" = iphoneos-arm64
+          test "$(dpkg-deb -f "$deb" Version)" = 1.1.0
+          dpkg-deb -c "$deb"
+          dpkg-deb -R "$deb" /tmp/nhovpn-package
+          dylib=/tmp/nhovpn-package/var/jb/Library/MobileSubstrate/DynamicLibraries/NeverHeardOfVPNs.dylib
+          lipo -info "$dylib"
+          lipo -thin arm64e "$dylib" -output /tmp/nhovpn-arm64e
+          test "$(xxd -p -s 8 -l 4 /tmp/nhovpn-arm64e)" = 02000080
+          otool -L "$dylib"
+          ldid -h "$dylib"
+          shasum -a 256 artifacts/* > artifacts/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: neverheardofvpns-rootless
+          path: artifacts/*
