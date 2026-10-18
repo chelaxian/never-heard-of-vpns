@@ -40,35 +40,6 @@ void (*nhovpn_memory_writer)(void *, const void *, uint64_t);
 #include <mach-o/loader.h>
 #include <mach-o/nlist.h>
 
-extern kern_return_t mach_vm_allocate(vm_map_t, mach_vm_address_t *, mach_vm_size_t, int);
-extern kern_return_t mach_vm_deallocate(vm_map_t, mach_vm_address_t, mach_vm_size_t);
-extern kern_return_t mach_vm_protect(vm_map_t, mach_vm_address_t, mach_vm_size_t, boolean_t, vm_prot_t);
-extern kern_return_t mach_vm_remap(vm_map_t, mach_vm_address_t *, mach_vm_size_t, mach_vm_offset_t,
-                                 int, vm_map_t, mach_vm_address_t, boolean_t, vm_prot_t *, vm_prot_t *, vm_inherit_t);
-
-// ratu.sh 2026-10-18: protected __DATA_CONST pages may reject both vm_protect
-// and MSHookMemory. Replace only this app-owned import-data page with a private
-// read-only copy. The dyld callback serializes image updates; no code page or
-// Apple shared-cache mapping is changed.
-static bool replace_import_pointer(void **slot, void *value) {
-  const mach_vm_size_t page_size = (mach_vm_size_t)vm_page_size;
-  mach_vm_address_t page = (mach_vm_address_t)slot & ~(page_size - 1);
-  mach_vm_address_t copy = 0;
-  vm_map_t task = mach_task_self();
-  if (mach_vm_allocate(task, &copy, page_size, VM_FLAGS_ANYWHERE) != KERN_SUCCESS) return false;
-  memcpy((void *)copy, (const void *)page, (size_t)page_size);
-  *(void **)(copy + (mach_vm_address_t)slot - page) = value;
-  bool success = false;
-  if (mach_vm_protect(task, copy, page_size, false, VM_PROT_READ) == KERN_SUCCESS) {
-    vm_prot_t current = VM_PROT_READ, maximum = VM_PROT_READ;
-    mach_vm_address_t target = page;
-    success = mach_vm_remap(task, &target, page_size, 0, VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE,
-                           task, copy, true, &current, &maximum, VM_INHERIT_COPY) == KERN_SUCCESS;
-  }
-  mach_vm_deallocate(task, copy, page_size);
-  return success && *slot == value;
-}
-
 #ifdef __LP64__
 typedef struct mach_header_64 mach_header_t;
 typedef struct segment_command_64 segment_command_t;
@@ -200,10 +171,9 @@ static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
             if (writer) {
               void *replacement = cur->rebindings[j].replacement;
               writer(&indirect_symbol_bindings[i], &replacement, sizeof(replacement));
+              if (indirect_symbol_bindings[i] == replacement)
+                __atomic_fetch_add(&nhovpn_binding_stats[3], 1, __ATOMIC_RELAXED);
             }
-            if (indirect_symbol_bindings[i] == cur->rebindings[j].replacement ||
-                replace_import_pointer(&indirect_symbol_bindings[i], cur->rebindings[j].replacement))
-              __atomic_fetch_add(&nhovpn_binding_stats[3], 1, __ATOMIC_RELAXED);
           }
           goto symbol_loop;
         }
